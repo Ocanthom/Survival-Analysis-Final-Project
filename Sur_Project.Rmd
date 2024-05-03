@@ -1,0 +1,381 @@
+---
+title: "Sur_Project"
+author: "Isaiah Thompson Ocansey"
+date: "`r Sys.Date()`"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+
+library(dplyr)
+library(maps)
+library(reshape2)
+#library(FactoMineR)
+library(corrr)
+library(ggplot2)
+library(ggcorrplot)
+library(devtools)
+library(factoextra)
+library(tidyr)
+library(stringr)
+library(plotly)
+library(usmap)
+library(knitr)
+library(mice)
+library(VIM)
+library(lattice)
+library(reshape2)
+library(lubridate)
+library(leaflet)
+library(VIM)
+library(caret)
+library(stats)
+library(visdat)
+library(wesanderson)
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+
+```{r}
+uis <- read.table(file="uissurv.txt",
+sep="", header=F, na.strings = ".",
+col.names=c("id", "age", "beck", "hercoc", "ivhx", "ndrugtx",
+"race", "treat", "site", "los", "time", "status"))
+head(uis);dim(uis)
+```
+
+
+
+
+
+```{r}
+#Total Missing per Variable
+
+colSums(is.na(uis))
+
+```
+
+
+
+```{r}
+png("missing1.png")
+# Calculate the proportion of missing data for each variable
+missing_proportions <- colSums(is.na(uis)) / nrow(uis)
+
+# Create a color palette that has as many colors as there are variables
+colors <- rainbow_hcl(length(missing_proportions))
+
+
+
+barplot(missing_proportions, main = "Proportion of Missing Data by Variable", 
+        ylab = "Proportion Missing", xlab = "Variables", col = colors, las = 2, cex.names = 0.8)
+
+# Adding a legend to explain the colors
+legend("topright", legend = names(missing_proportions), fill = colors, cex = 0.75, title = "Variables")
+dev.off()
+
+```
+
+
+```{r}
+#Toatal Missng for the entire Dataset
+png("missing2.png")
+vis_miss(uis)
+dev.off()
+
+```
+
+
+
+#DAtA IMPUTATION
+
+```{r}
+
+data.imputed<-preProcess(uis,method = c("medianImpute"))
+data.imputed<-predict(data.imputed,uis)
+data.imputed;colSums(is.na(data.imputed))
+
+```
+
+
+
+
+
+```{r}
+png("boxplot.png")
+#finding the distribution of the variables
+# Reshape the data for ggplot2
+uis_long <- tidyr::pivot_longer(uis, cols = c("age", "beck", "hercoc", "ivhx", "ndrugtx", "los", "time"))
+
+# Create boxplot
+ggplot(uis_long, aes(x = name, y = value, fill = name)) +
+  geom_boxplot() +
+  theme_minimal() +
+  labs(x = "Variables", y = "Value") +
+  scale_fill_brewer(palette = "Set3")  # Use a different color palette
+
+
+dev.off()
+
+```
+
+
+
+
+```{r}
+png("scatter.png")
+ggplot(uis, aes(x = age, y = beck)) +
+  geom_point(aes(color = factor(treat))) +
+  labs(
+    title = "Scatter plot of Age and Beck",
+    subtitle = NULL,
+    caption = "Source: uis data"
+  )
+
+dev.off()
+```
+
+
+
+
+```{r}
+library(GGally)
+png("scor.png")
+ggcorr(uis, label = TRUE)
+dev.off()
+```
+
+
+
+#o calculate the censoring rate on the observed event times, you first need to understand which observations are censored in your dataset. In survival analysis, censoring occurs when the event of interest (such as death or failure) has not occurred for some individuals by the end of the study period or by the time they are lost to follow-up.
+
+#In the provided dataset uis, the column status likely indicates whether an event was observed (status = 1) or censored (status = 0). You can calculate the censoring rate by counting the number of censored observations and dividing it by the total number of observations.
+
+
+
+
+```{r}
+# Count the number of censored observations
+censored_count <- sum(uis$status == 0, na.rm = TRUE)
+
+# Calculate the total number of observations
+total_obs <- nrow(uis)
+
+# Calculate the censoring rate
+censoring_rate <- censored_count / total_obs
+
+# Print the censoring rate
+cat("Censoring rate:", censoring_rate)
+
+```
+
+
+(c) Among the covariates, how many of them are continuous and how many are categorical?
+
+
+```{r}
+str(uis)
+```
+
+
+
+
+
+
+(2a) Plot the Kaplan-Meier survival curves in the two treatment groups and compare.
+Does the proportional hazards (PH) seem to hold?
+
+
+To plot Kaplan-Meier survival curves for the two treatment groups and assess the proportional hazards assumption,we use the setps
+
+
+
+
+```{r}
+library(survminer)
+library(survival)
+
+
+# Fit Kaplan-Meier survival curves for each treatment group
+km_fit <- survfit(Surv(time, status) ~ treat, data = uis)
+
+# Plot Kaplan-Meier survival curves
+g <- ggsurvplot(km_fit, data = uis, pval = TRUE, conf.int = TRUE)
+
+# Check proportional hazards assumption
+coxph_test <- coxph(Surv(time, status) ~ treat, data = uis)
+summary(coxph_test);
+png("scor.png")
+g
+dev.of
+
+```
+
+
+
+We use the survfit function from the survival package to fit Kaplan-Meier survival curves for each treatment group.
+Then, we use the ggsurvplot function from the survminer package to plot the Kaplan-Meier curves. Setting pval = TRUE displays the p-value for the log-rank test, which compares the survival curves between the treatment groups.
+Finally, we use the coxph function from the survival package to fit a Cox proportional hazards model and check the proportional hazards assumption.
+
+
+
+(2b) Use logrank test to assess the effect of "treat". And then fit a Cox PH with "treat"
+only. Among the three tests (LRT, score, and Wald) available in the output of Cox
+PH model, to which one is the logrank test closest? Interpret the results in terms
+of the hazard ratio or relative risk between the two treatment groups.
+
+
+
+To perform the logrank test and fit a Cox proportional hazards (PH) model with only the "treat" variable, you can follow these steps
+
+```{r}
+# Perform logrank test
+logrank_test <- survdiff(Surv(time, status) ~ treat, data = uis)
+print(logrank_test)
+
+# Fit Cox PH model with only "treat" variable
+cox_model <- coxph(Surv(time, status) ~ treat, data = uis)
+summary(cox_model)
+
+# Interpretation
+# The logrank test assesses whether there is a difference in survival between the treatment groups.
+# If the p-value is significant (typically < 0.05), it suggests that the survival curves differ significantly.
+# The Cox PH model estimates the hazard ratio (HR) associated with the "treat" variable.
+# If the HR is greater than 1, it indicates a higher hazard (worse survival) in one treatment group compared to the other.
+# The LRT (Likelihood Ratio Test) in the Cox PH model output is closest to the logrank test, as both test for differences in survival.
+
+```
+
+
+(2c) It is often of interest to examine treatment-by-site interaction in a multi-center trial.
+Fit a Cox PH model with the interaction term treat×site and determine whether
+site is an effect-moderator
+
+
+To fit a Cox proportional hazards (PH) model with the interaction term between "treat" and "site" and determine whether "site" moderates the treatment effect, you can follow these steps:
+
+
+```{r}
+# Fit Cox PH model with interaction term (treat * site)
+cox_model_interaction <- coxph(Surv(time, status) ~ treat * site, data = uis)
+summary(cox_model_interaction)
+
+# Interpretation
+# The interaction term (treat * site) in the Cox PH model assesses whether the treatment effect varies across different sites.
+# If the p-value associated with the interaction term is significant (typically < 0.05), it suggests that the effect of treatment differs significantly across sites, indicating moderation.
+# You can also examine the hazard ratios (HRs) associated with the interaction term to understand the direction and magnitude of the moderation effect.
+
+```
+
+
+To fit simple Cox proportional hazards (PH) models for variable screening purposes, you can include each variable one at a time and output the p-value of the likelihood ratio test (LRT) associated with each variable. Here's how you can do it in R:
+
+
+```{r}
+# Create an empty data frame to store results
+variable_screening_results <- data.frame(Variable = character(),
+                                         P_Value_LRT = numeric(),
+                                         stringsAsFactors = FALSE)
+
+# Fit simple Cox PH models for each variable
+for (variable in names(uis)[!names(uis) %in% c("time", "status")]) {  # Exclude time and status variables
+  cox_model <- coxph(Surv(time, status) ~ uis[[variable]], data = uis)
+  p_value_lrt <- summary(cox_model)$logtest["pvalue"]
+  variable_screening_results <- rbind(variable_screening_results, 
+                                      data.frame(Variable = variable, P_Value_LRT = p_value_lrt))
+}
+
+# Tabulate the results
+print(variable_screening_results)
+
+```
+
+This code iterates through each variable (excluding "time" and "status") and fits a simple Cox PH model with that variable as the only predictor. It then extracts the p-value associated with the likelihood ratio test (LRT) from the summary output of each model and stores the results in a data frame. Finally, it prints the tabulated results showing the variable name and its corresponding p-value from the LRT. Adjustments for multiple testing should be considered if conducting numerous tests simultaneously. Let me know if you need further assistance!
+
+
+
+
+
+
+To build the 'best' predictive Cox proportional hazards (PH) model with a variable selection procedure and optionally including first-order interaction terms, you can follow these steps:
+
+Remove all rows that contain missing values.
+Perform variable selection using a suitable method (e.g., stepwise selection, LASSO, elastic net).
+Optionally consider including first-order interaction terms.
+Fit the Cox PH model with the selected variables and interaction terms.
+Here's a general outline of how you can do this in R:
+
+r
+```{r}
+# Step 1: Remove rows with missing values
+uis_complete <- na.omit(uis)
+
+# Step 2: Perform variable selection (e.g., stepwise selection)
+# Example using stepwise selection with the stepAIC function from the MASS package
+library(MASS)
+step_model <- stepAIC(coxph(Surv(time, status) ~ ., data = uis_complete), direction = "both")
+
+# Extract the selected variables from the stepwise model
+selected_variables <- names(step_model$coefficients)[-1]  # Exclude intercept
+
+# Step 3: Optionally consider including first-order interaction terms
+# Example: Adding interaction terms for all pairs of selected variables
+interaction_terms <- combn(selected_variables, 2, paste, collapse = ":")
+interaction_formula <- as.formula(paste("Surv(time, status) ~ . +", paste(interaction_terms, collapse = " + ")))
+
+# Step 4: Fit the Cox PH model with the selected variables and interaction terms
+bfit_ph <- coxph(interaction_formula, data = uis_complete)
+
+# View the summary of the model
+summary(bfit_ph)
+
+```
+
+
+In this example, stepwise selection is used to select variables, and interaction terms are included for all pairs of selected variables. You can replace stepwise selection with other variable selection methods if desired. Adjust the code according to your specific variable selection procedure and modeling requirements. Let me know if you need further assistance!
+
+
+
+
+
+
+
+
+
+
+
+
+(3c) Interpret your ‘best’ Cox model bfit.ph. Which variables are highly predictive
+of drug relapse? Are there any variables that are significant in the simple Cox
+model but not selected by the multiple Cox model? Are there any variables that
+are insignificant in the simple Cox model but becomes significant in the multiple
+Cox model?
+
+To interpret the 'best' Cox model bfit.ph, you can examine the coefficients and significance levels of the variables included in the model. Here's how you can interpret the model and address the questions:
+
+Highly Predictive Variables: Look at the coefficients and p-values of the variables in the model. Variables with larger absolute coefficients and lower p-values are more predictive. These variables have a stronger association with the risk of drug relapse.
+Variables Significant in Simple Cox Model but Not Selected: Compare the variables included in the 'best' Cox model with those significant in the simple Cox model. If there are variables significant in the simple model but not selected in the multiple model, it suggests that these variables may not contribute significantly to the prediction when other variables are considered.
+Variables Insignificant in Simple Cox Model but Significant in Multiple Cox Model: Similarly, examine if there are variables insignificant in the simple model but become significant in the multiple model. This indicates that these variables may have a confounding effect or interaction with other variables, making them significant when considered together.
+
+
+
+```{r}
+# View the summary of the 'best' Cox model
+summary(bfit_ph)
+
+# 1. Highly Predictive Variables
+# Look at the coefficients and p-values of the variables
+# Variables with lower p-values and larger absolute coefficients are more predictive
+
+# 2. Variables Significant in Simple Cox Model but Not Selected
+# Compare the variables included in the simple model with those in the 'best' model
+# Identify variables significant in the simple model but not in the 'best' model
+
+# 3. Variables Insignificant in Simple Cox Model but Significant in Multiple Cox Model
+# Identify variables significant in the 'best' model but not in the simple model
+# These are variables that became significant after considering other variables
+
+```
+
+
+
